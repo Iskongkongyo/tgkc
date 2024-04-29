@@ -8,7 +8,7 @@ const bot = new TelegramBot('机器人API TOKEN', { polling: true });
 
 // 创建与MySQL数据库的连接
 const connection = mysql.createConnection({
-  host: '127.0.0.1',
+  host: '数据库IP地址/域名',
   user: '数据库用户名',
   password: '数据库密码',
   database: '数据库名'
