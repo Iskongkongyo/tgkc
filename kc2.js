@@ -6,14 +6,14 @@ const fs = require('fs');
 //能存储错误信息到error.txt文件中（对比ss.js的区别）
 
 // 创建与Telegram Bot API的连接
-const bot = new TelegramBot('6504459759:AAEEO5y7UnbBUspCyxwXwn2VAvHZqu2jLkc', { polling: true });
+const bot = new TelegramBot('机器人API TOKEN', { polling: true });
 
 // 创建与MySQL数据库的连接
 const connection = mysql.createConnection({
   host: '127.0.0.1',
-  user: 'mrli_ffkc',
-  password: 'ZmbhmyTJHYTyzLc6',
-  database: 'mrli_ffkc'
+  user: '数据库用户名',
+  password: '数据库密码',
+  database: '数据库名'
 });
 
 // 连接数据库
