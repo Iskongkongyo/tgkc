@@ -1,16 +1,21 @@
 const TelegramBot = require('node-telegram-bot-api');
 const mysql = require('mysql');
 
-//目前群组任何人均可操控芙芙开车机器人，后续添加命令只识别群主
+//目前群组任何人均可操控芙芙开车机器人，例如：/kc@机器人用户名、/zt@机器人用户名
+//msg.chat.type可以获取聊天对象类型。private为用户，supergroup为群组
+//id为负数的为群组，正数的为用户
 
 // 创建与Telegram Bot API的连接
-const bot = new TelegramBot('机器人API TOKEN', { polling: true });
+const bot = new TelegramBot('填写Telegram Bot API', { polling: true });
+
+//开车机器人管理员id
+const adminId = 填写管理员id;
 
 // 创建与MySQL数据库的连接
 const connection = mysql.createConnection({
-  host: '数据库IP地址/域名',
-  user: '数据库用户名',
-  password: '数据库密码',
+  host: '数据库IP',
+  user: '用户名',
+  password: '密码',
   database: '数据库名'
 });
 
@@ -35,7 +40,7 @@ bot.on('message', (msg) => {
   const videoUrl = msg.video ? msg.video.file_id : null;
 
   // 判断是否为机器人主人发送的消息
-  if (msg.from.id === 5167635352 && videoUrl) {
+  if (msg.from.id === adminId && videoUrl) {
     // 存储视频消息的url到videos数据表中
     connection.query('INSERT INTO videos (url) VALUES (?)', [videoUrl], (error, results) => {
       if (error) {
@@ -51,6 +56,12 @@ bot.on('message', (msg) => {
 // 处理接收到的开车命令
 bot.onText(/\/kc/, (msg) => {
   const chatId = msg.chat.id;
+
+ //检测群组或私聊是否已经进行推送
+   if(timeoutMap[chatId]){
+      bot.sendMessage(chatId, '芙芙已经在尽力推送视频的路上喵~');
+      return;
+   }
 
   // 检查群组或私聊是否在groups数据表中
   connection.query('SELECT * FROM groups WHERE chatid = ?', [chatId], (error, results) => {
@@ -90,11 +101,15 @@ bot.onText(/\/zt/, (msg) => {
 
     if (error) {
       console.error('停止推送视频消息时发生错误:', error.message);
-      bot.sendMessage(chatId,'停不下来，芙芙要变奇怪了，快联系@IsKongKong抢救一下！');
+      bot.sendMessage(chatId,'停不下来，芙芙要变奇怪了，快联系@抢救一下！');
+      bot.sendMessage(adminId,'亲爱的主人，芙芙要坏掉了，赶紧来补救一下！触发错误的id为'+chatId+'且'+username+'为其用户名！');
+      connection.end();//关闭数据库
+      process.exit(1); // 退出应用
       return;
     }
     clearTimeout(timeoutMap[chatId][0]);
-    console.log('已停止推送视频消息');
+    delete timeoutMap[chatId];
+    console.log('已停止为'+chatId+'推送视频消息');
     bot.sendMessage(chatId,'芙芙累了，已停止推送视频消息喵~');
   });
 
@@ -134,13 +149,14 @@ function sendVideoMessages(chatId, now) {
     if (now >= results.length) {
       // 当 now 的值为最后一个视频消息的索引时，暂停提供视频，将当前 now 赋值给 now 字段
       clearTimeout(timeoutMap[chatId][0]);
-      console.log('已停止推送视频消息');
+      delete timeoutMap[chatId];
+      console.log('已停止为'+chatId+'推送视频消息');
       connection.query('UPDATE groups SET now = ? WHERE chatid = ?', [timeoutMap[chatId][1] + 1, chatId], (error, results) => {
         if (error) {
           console.error('更新 now 字段时发生错误:', error.message);
         }
       });
-      bot.sendMessage(chatId, "芙芙库存被榨干了喵，已自动暂停，可以联系@IsKongKong补库存喵~\n库存有新增了可以重新输入/kc激活芙芙喵~");
+      bot.sendMessage(chatId, "芙芙库存被榨干了喵，已自动暂停，可以联系@补库存喵~\n库存有新增了可以重新输入/kc激活芙芙喵~");
     } else {
       // 发送视频消息
       bot.sendVideo(chatId, results[now].url, { caption: '生活不易，芙芙发车卖艺喵，每隔10分钟发一次车喵~' })
@@ -149,6 +165,8 @@ function sendVideoMessages(chatId, now) {
         })
         .catch(error => {
           console.error('视频消息发送失败:', error.message);
+          clearTimeout(timeoutMap[chatId][0]);
+          delete timeoutMap[chatId];
         });
 
       // 延迟10分钟后继续发送下一个视频消息
