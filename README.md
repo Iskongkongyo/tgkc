@@ -1,5 +1,7 @@
 # TG开车
 
+获取群组/频道/用户/机器人ID的机器人：[@GetTheirIDBot](https://t.me/GetTheirIDBot)
+
 使用Nodejs简单实现TG开车的功能，支持群组和个人开车。
 
 /kc是开车命令，默认十分钟一发车。/zt是暂停命令，会停止发车。
