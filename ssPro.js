@@ -2,6 +2,7 @@ const TelegramBot = require('node-telegram-bot-api');
 const mysql = require('mysql2/promise');
 const fs = require('fs').promises;
 const path = require('path');
+const chokidar = require('chokidar');
 
 //目前群组任何人均可操控芙芙开车机器人，例如：/kc@机器人用户名、/zt@机器人用户名
 //部署本代码的机器人可以在群组或者个人用户中提供服务，频道暂时不行，被@也收不到消息
@@ -11,7 +12,7 @@ const path = require('path');
 
 // 全局配置
 let config = {};
-let pool; // MySQL连接池
+let pool;
 const timeoutMap = new Map();
 
 /* 初始化函数 */
@@ -33,6 +34,12 @@ async function loadConfig() {
   }
 }
 
+// 监听配置文件变化
+chokidar.watch('./config.json', { persistent: true }).on('change', () => {
+  console.log('检测到配置文件更改，重新加载...');
+  loadConfig();
+});
+
 /* 初始化数据库连接池 */
 async function initializeDatabase() {
   pool = mysql.createPool({
@@ -47,7 +54,6 @@ async function initializeDatabase() {
     console.log('成功连接到数据库');
     await appendLog('数据库连接成功');
     
-    // 启动心跳检测
     setInterval(async () => {
       await pool.query('SELECT 1');
     }, config.pingInterval || 300000);
@@ -80,6 +86,50 @@ function getBeijingTime() {
   });
 }
 
+/* 视频推送核心逻辑 */
+async function pushVideo(bot, chatId, index) {
+  try {
+    const [videos] = await pool.query('SELECT url FROM videos ORDER BY id');
+
+    if (index >= videos.length) {
+      await bot.sendMessage(chatId, '库存告急，请联系管理员~');
+      timeoutMap.delete(chatId);
+      await pool.query('UPDATE groups SET now = 0 WHERE chatid = ?', [chatId]);
+      return;
+    }
+
+    // 发送视频并添加控制按钮
+    await bot.sendVideo(chatId, videos[index].url, config.infos || {});
+
+    // 清除旧定时器并设置新定时器
+    if (timeoutMap.has(chatId)) {
+      clearTimeout(timeoutMap.get(chatId).timer);
+    }
+
+    const timer = setTimeout(async () => {
+      await pushVideo(bot, chatId, index + 1);
+    }, config.pushInterval || 600000);
+
+    // 更新状态
+    timeoutMap.set(chatId, { timer, nextIndex: index + 1 });
+    await pool.query('UPDATE groups SET now = ? WHERE chatid = ?', [index + 1, chatId]);
+
+  } catch (err) {
+    await handleError(err, '视频推送失败', chatId);
+    timeoutMap.delete(chatId);
+  }
+}
+
+/* 启动推送流程 */
+async function startPush(bot, chatId, startIndex, username) {
+  try {
+    await appendLog(`开始推送: ${chatId} (${username})`);
+    await pushVideo(bot, chatId, startIndex);
+  } catch (err) {
+    await handleError(err, '启动推送失败', chatId);
+  }
+}
+
 /* Telegram机器人逻辑 */
 function startBot() {
   const bot = new TelegramBot(config.botToken, { polling: true });
@@ -94,6 +144,7 @@ function startBot() {
       if (video && adminRegex.test(msg.from.id)) {
         await pool.query('INSERT INTO videos (url) VALUES (?)', [video.file_id]);
         await appendLog(`管理员上传视频: ${video.file_id}`);
+        await bot.sendMessage(chatId, `视频已收录，当前库存：${(await pool.query('SELECT COUNT(*) as count FROM videos'))[0][0].count}`);
       }
     } catch (err) {
       await handleError(err, '消息处理失败', msg.chat.id);
@@ -122,61 +173,32 @@ function startBot() {
     }
   });
 
-  // 停止命令
-  bot.onText(/\/zt/, async (msg) => {
+  // 回调处理
+  bot.on('callback_query', async (callbackQuery) => {
+    const msg = callbackQuery.message;
+    const data = callbackQuery.data;
+    const chatId = msg.chat.id;
+
     try {
-      const chatId = msg.chat.id;
-      if (!timeoutMap.has(chatId)) return;
-
-      const entry = timeoutMap.get(chatId);
-      clearTimeout(entry.timer);
-      timeoutMap.delete(chatId);
-
-      await pool.query('UPDATE groups SET now = ? WHERE chatid = ?', [entry.nextIndex, chatId]);
-      await bot.sendMessage(chatId, '芙芙休息一下~');
-      await appendLog(`停止推送: ${chatId}`);
+      if (data === '/next') {
+        if (!timeoutMap.has(chatId)) {
+          await bot.sendMessage(chatId, '请先使用/kc命令启动推送');
+          return;
+        }
+        const entry = timeoutMap.get(chatId);
+        await pushVideo(bot, chatId, entry.nextIndex);
+      } else if (data === '/zt') {
+        if (timeoutMap.has(chatId)) {
+          clearTimeout(timeoutMap.get(chatId).timer);
+          timeoutMap.delete(chatId);
+          await bot.sendMessage(chatId, '芙芙休息一下~');
+          await appendLog(`停止推送: ${chatId}`);
+        }
+      }
     } catch (err) {
-      await handleError(err, '处理/zt命令失败', msg.chat.id);
+      await handleError(err, '处理回调失败', chatId);
     }
   });
-}
-
-/* 视频推送逻辑 */
-async function startPush(bot, chatId, startIndex, username) {
-  try {
-    const [videos] = await pool.query('SELECT url FROM videos ORDER BY id');
-    
-    const pushNext = async (index) => {
-      if (index >= videos.length) {
-        await bot.sendMessage(chatId, '库存告急，请联系管理员~');
-        timeoutMap.delete(chatId);
-        await pool.query('UPDATE groups SET now = 0 WHERE chatid = ?', [chatId]);
-        return;
-      }
-
-      try {
-        await bot.sendVideo(chatId, videos[index].url, {
-          caption: '生活不易，芙芙发车卖艺~'
-        });
-
-        const timer = setTimeout(() => pushNext(index + 1), config.pushInterval || 600000);
-        timeoutMap.set(chatId, { 
-          timer, 
-          nextIndex: index + 1 
-        });
-
-        await pool.query('UPDATE groups SET now = ? WHERE chatid = ?', [index + 1, chatId]);
-      } catch (err) {
-        await handleError(err, '视频推送失败', chatId);
-        timeoutMap.delete(chatId);
-      }
-    };
-
-    await appendLog(`开始推送: ${chatId} (${username})`);
-    pushNext(startIndex);
-  } catch (err) {
-    await handleError(err, '启动推送失败', chatId);
-  }
 }
 
 /* 统一错误处理 */
