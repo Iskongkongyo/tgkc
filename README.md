@@ -20,9 +20,9 @@ npm install node-telegram-bot-api
 
 npm install mysql
 
-2、安装mysql2模块（适用于ssPro.js）
+2、安装mysql2和chokidar模块（适用于ssPro.js）
 
-npm install mysql2
+npm install mysql2、npm install chokidar
 
 ## 修改配置信息
 
@@ -32,13 +32,15 @@ npm install mysql2
 
 ## 配置文件(config.json)说明
 
-| Key          | Value                                                        |
-| ------------ | ------------------------------------------------------------ |
-| botToken     | 机器人API Token                                              |
-| adminId      | 管理员ID，可填写多个，多个管理员ID以“\|”分割。格式如下所示：id1\|id2\|id3 |
-| sql          | 填写导入data.sql文件数据库的连接信息                         |
-| pushInterval | 视频推送间隔，单位是秒，默认每间隔10分钟推送一次             |
-| pingInterval | SQL数据库心跳测试，单位是秒，默认10分钟测试一次              |
+| Key             | Value                                                        |
+| --------------- | ------------------------------------------------------------ |
+| botToken        | 机器人API Token                                              |
+| adminId         | 管理员ID，可填写多个，多个管理员ID以“\|”分割。格式如下所示：id1\|id2\|id3 |
+| sql             | 填写导入data.sql文件数据库的连接信息                         |
+| caption         | 推送视频下面的文字内容                                       |
+| inline_keyboard | 其中每一个数组元素为一行按钮，text值为按钮名，url为跳转地址，callback_data通常为命令 |
+| pushInterval    | 视频推送间隔，单位是秒，默认每间隔10分钟推送一次             |
+| pingInterval    | SQL数据库心跳测试，单位是秒，默认10分钟测试一次              |
 
 ## 运行和命令
 
